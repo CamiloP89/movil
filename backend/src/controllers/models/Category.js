@@ -74,3 +74,29 @@ categorySchema.pre('findOneAndUpdate', function(next) {
     }
     next();
 });
+
+categoryShema.virtual('productCount', {
+    ref: 'Product',
+    localField: '_id',
+    foreingField: 'category'
+});
+
+categoryShema.static.findActive = function(){
+    return this.findActive({isActive: true}).sort({sortOrder:1, name: 1})
+};
+
+categorySchema.methods.canBeDeleted = async function() {
+    const Subcategory = mongoose.model('SubCategory');
+    const Product = mongoose.model('Product');
+
+    const SubcategoriesCount = await Subcategory.countDocuments({ category: this._id})
+    const productCount = await Product.countDocuments({ Product: this._id})
+
+    return SubcategoriesCount === 0 && productCount === 0;
+};
+
+categoryShema.index({isActive: 1});
+categoryShema.index({sortOrder: 1});
+categoryShema.index({createdBy: 1});
+
+module.exports = mongoose.model('category', categorySchema);
