@@ -22,7 +22,11 @@ const getCategories = asyncHandler(async(req, res) =>{
     .populate('createdBy', 'username', 'firstName', 'LastName')
     .populate('subcategoriesCount')
     .populate('productsCount')
-    .sort({sortOrder: 1, name: 1})
+    .sort({sortOrder: 1, name: 1});
+
+    if (req.query.page) {
+        query = query.skip(skip.limit(limit));
+    }
 });
 
 const getActiveCategories = asyncHandler(async (req, res) =>{
@@ -37,7 +41,7 @@ const getActiveCategories = asyncHandler(async (req, res) =>{
 const getCategoryById = asyncHandler(async(req, res) =>{
     const category = await Category.findById(req.params.id)
     .populate('createdBy', 'username firstName LastName')
-    .populate('createdBy', 'username firstName LastName');
+    .populate('updateBy', 'username firstName LastName');
     if(!category) {
         return res.status(404).json({
             success: false,
@@ -45,7 +49,7 @@ const getCategoryById = asyncHandler(async(req, res) =>{
         });
     }
     //Obtener subcategorias de la categoria padre
-    const subcategorias = await Subcategory.find({category: category._id, isActive: true})
+    const subcategories = await Subcategory.find({category: category._id, isActive: true})
     .sort({sortOrder: 1, name: 1});
     res.status(200).json({
         success: true,
@@ -66,8 +70,14 @@ const createdCategory = asyncHandler(async(req, res) =>{
         });
     }
     const existingCategory = await Category.findOne({
-        name: {$regex: new RegExp}
+        name: {$regex: new RegExp(`^${name}$`, 'i') }
     });
+    if (existingCategory) {
+        return res.status(400).json({
+            success: false,
+            message: 'Ya existe una categoria con ese nombre'
+        });
+    }
 
     //crear la categoria
     const category = await Category.create({
@@ -108,6 +118,7 @@ const updateCategory = asyncHandler(async(req, res) =>{
             });
         }
     }
+    
     // Actualizar la categoria
     if (name) category.name = name;
     if (description !== undefined) category.description = description;
@@ -123,3 +134,149 @@ const updateCategory = asyncHandler(async(req, res) =>{
         data: category
     })
 });
+
+// Eliminar categoria
+
+const deleteCategory = asyncHandler (async(req, res) =>{
+    const category = await Category.findById(req.params.id);
+    if(!category) {
+        return res.status(404).json({
+            success: false,
+            message: 'Categoria no encontrada'
+        });
+    }
+
+ //Verificar si se puede eliminar
+
+ const canDelete = await category.canDelete();
+    if(!canDelete){
+        return res.status(404).json({
+            success: false,
+            message: 'No se puede eliminar esta categoria por que tiene subcateogiras o productos asociados'
+        })
+ }
+    await Category.findByIdAndDelete(req.params.id);
+    res.status(200).json({
+        success: true,
+        message: 'Categoria elminada correctamente'
+});
+
+});
+
+//Activar o desactivar categoria
+
+const toggleCategoryStatus = asyncHandler(async(req,res) =>{
+    const category = await Category.findById(req.params.id);
+    if(!category) {
+        return res.status(404).json({
+            success: false,
+            message: 'Categoria no encontrada'
+        });
+    }
+    category.isActive = !category.isActive;
+    category.updatedBy = req.user._id;
+    await category.save();
+    // Si la categoria se desactiva desactivar sibcategorias y productos asociados
+    if (!category.isActive) {
+        await Subcategory.updateMany(
+            { category: category._id},
+            {isActive: false, updatedBy: req.user._id}
+        );
+        await Subcategory.updateMany(
+            { category: category._id},
+            {isActive: false, updatedBy: req.user._id}
+        );
+        await Product.updateMany(
+            { category: category._id},
+            {isActive: false, updatedBy: req.user._id}
+        );
+    }
+    res.status(200).json({
+        success: true,
+        message: `categoria ${category.isActive ? 'Activada' : 'Desactivada'} exitosamente`,
+        data: category
+    });
+});
+
+//Ordenar categorias
+const reorderCategories = asyncHandler(async(req, res)=>{
+    const {categoryIds} = req.body;
+    if(!Array.isArray(categoryIds)) {
+        return res.status(400).json({
+            success: false,
+            message: 'Se requiere un aray de ids de categorias'
+        });
+    }
+    //actualizar el orden de las categorias 
+    const updatePromises = categoryIds.map((category, index) =>
+        category.findByIdAnUpdate(
+            categoryId,
+            {
+                sortOrder: index + 1,
+                updatedBy: req.user._id
+            },
+            {new: true}
+        )
+    );
+    await Promise.all(updatePromises);
+    res.status(200).json({
+        success: true,
+        message: 'Prdem de cagoorias actualizado correctamente'
+    })
+});
+
+// Obtener estadisticas de categorias
+const getCategoryStats = asyncHandler (async(req,res) =>{
+    const stats = await Category.aggregate([
+        {
+            $group: {
+                _id: null,
+                totalCategories: { $sum: 1},
+                activateCategories: {
+                    $sum: {$cond: [{$eq: ['$isActive', true]}, 1, 0 ]}
+                },
+            }
+        }
+    ]);
+    const categoriesWithSubcounts = await Category.aggregate([
+        {
+            $lookup: {
+                from: '$subcategories',
+                localField: '_id',
+                foreignField: 'category',
+                as: 'subcategories'
+            }
+        },
+        {
+            $project: {
+                name: 1,
+                subcategoriesCount: {$size: '$subcategories'}
+            }
+        },
+        {$sort: { subcategoriesCount: -1 }},
+        {$limit: 5}
+    ]);
+    res.status(200).json({
+        success: true,
+        data: {
+            stast: stats[0] || {
+                totalCategories: 0 ,
+                activeCategories: 0
+    
+        },
+            topCategories: categoriesWithSubcounts
+        }
+    });
+});
+
+module.exports ={
+    getCategories,
+    getActiveCategories,
+    getCategoryById,
+    createdCategory,
+    updateCategory,
+    deleteCategory,
+    toggleCategoryStatus,
+    reorderCategories,
+    getCategoryStats
+};

@@ -231,4 +231,6 @@ const toggleUserStatus = asyncHandler(async(req, res) => {
             message: 'No puedes cambiar tu propio estado'
         });
     }
+
+    
 });
