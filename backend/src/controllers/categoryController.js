@@ -208,7 +208,7 @@ const reorderCategories = asyncHandler(async(req, res)=>{
         });
     }
     //actualizar el orden de las categorias 
-    const updatePromises = categoryIds.map((category, index) =>
+    const updatePromises = categoryIds.map((categoryId, index) =>
         category.findByIdAnUpdate(
             categoryId,
             {
@@ -221,7 +221,7 @@ const reorderCategories = asyncHandler(async(req, res)=>{
     await Promise.all(updatePromises);
     res.status(200).json({
         success: true,
-        message: 'Prdem de cagoorias actualizado correctamente'
+        message: 'Orden de cagoorias actualizado correctamente'
     })
 });
 
